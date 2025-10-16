@@ -50,16 +50,11 @@ jobs:
 
       - name: Start RDP noVNC Server (websockify background)
         run: |
-          # Ensure pip and websockify are available
           python -m pip install --upgrade pip
           python -m pip install websockify
 
-          # Start websockify in background so it serves VNC->WebSocket for noVNC
-          # Assumes a VNC server is already listening on 127.0.0.1:5900.
           Write-Host "Starting websockify (noVNC bridge) in background on port 6080 -> 127.0.0.1:5900"
-          Start-Process -FilePath "python" -ArgumentList "-m websockify 6080 127.0.0.1:5900" -NoNewWindow -WindowStyle Hidden
-
-          # Give websockify a moment to start
+          Start-Process -FilePath "python" -ArgumentList "-m websockify 6080 127.0.0.1:5900" -WindowStyle Hidden
           Start-Sleep -Seconds 3
 
       - name: Expose via Cloudflared (foreground — prints URL)
@@ -72,12 +67,12 @@ jobs:
             exit 1
           }
 
-          # Print credentials first (so user sees them in log)
+          # Print credentials first
           Write-Host "`n=== RDP via noVNC ==="
           Write-Host "Username: RDP"
           Write-Host "Password: $env:RDP_CREDS"
           Write-Host "====================`n"
           Write-Host "Starting cloudflared in foreground. The ephemeral URL (trycloudflare) will be printed below."
 
-          # Run cloudflared in foreground (no trailing '&') — this prints ephemeral URL to stdout and keeps the job alive.
+          # Run cloudflared in foreground (no trailing '&') — prints ephemeral URL to stdout
           & $cf tunnel --url http://localhost:6080 --no-autoupdate
