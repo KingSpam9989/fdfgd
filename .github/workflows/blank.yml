@@ -46,35 +46,38 @@ jobs:
         run: |
           $url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
           $dest = "$env:ProgramFiles\cloudflared.exe"
-          Invoke-WebRequest $url -OutFile $dest
+          Invoke-WebRequest -Uri $url -OutFile $dest
 
-      - name: Start RDP noVNC Server
+      - name: Start RDP noVNC Server (websockify background)
         run: |
-          # Install noVNC & Websockify (Python)
+          # Ensure pip and websockify are available
           python -m pip install --upgrade pip
-          pip install websockify
-          
-          # Start RDP to VNC conversion (e.g., using xrdp or Windows RDP-to-VNC bridge)
-          # For Windows, simplest là dùng 'TurboVNC' hoặc 'FreeRDP-WebConnect' (bạn có thể tải và chạy)
-          # Giả sử bạn đã có sẵn vnc server chạy trên 127.0.0.1:5900
-          
-          # Start websockify (noVNC)
-          Start-Process python -ArgumentList "-m websockify 6080 127.0.0.1:5900" -NoNewWindow -PassThru
+          python -m pip install websockify
 
-      - name: Expose via Cloudflared Tunnel
-        run: |
-          # Cần tạo tunnel trước và có auth token lưu trong secret
-          & "$env:ProgramFiles\cloudflared.exe" tunnel --url http://localhost:6080 --no-autoupdate &
+          # Start websockify in background so it serves VNC->WebSocket for noVNC
+          # Assumes a VNC server is already listening on 127.0.0.1:5900.
+          Write-Host "Starting websockify (noVNC bridge) in background on port 6080 -> 127.0.0.1:5900"
+          Start-Process -FilePath "python" -ArgumentList "-m websockify 6080 127.0.0.1:5900" -NoNewWindow -WindowStyle Hidden
 
-      - name: Maintain Connection
+          # Give websockify a moment to start
+          Start-Sleep -Seconds 3
+
+      - name: Expose via Cloudflared (foreground — prints URL)
+        env:
+          RDP_CREDS: ${{ env.RDP_CREDS }}
         run: |
-          Write-Host "`n=== RDP via noVNC ==="
-          Write-Host "Connect in browser via Cloudflared URL"
-          Write-Host "Username: RDP"
-          Write-Host "Password: $(echo $env:RDP_CREDS)"
-          Write-Host "====================`n"
-          
-          while ($true) {
-              Write-Host "[$(Get-Date)] noVNC Active - Use Ctrl+C to terminate"
-              Start-Sleep -Seconds 300
+          $cf = "$env:ProgramFiles\cloudflared.exe"
+          if (-not (Test-Path $cf)) {
+            Write-Error "cloudflared executable not found at $cf"
+            exit 1
           }
+
+          # Print credentials first (so user sees them in log)
+          Write-Host "`n=== RDP via noVNC ==="
+          Write-Host "Username: RDP"
+          Write-Host "Password: $env:RDP_CREDS"
+          Write-Host "====================`n"
+          Write-Host "Starting cloudflared in foreground. The ephemeral URL (trycloudflare) will be printed below."
+
+          # Run cloudflared in foreground (no trailing '&') — this prints ephemeral URL to stdout and keeps the job alive.
+          & $cf tunnel --url http://localhost:6080 --no-autoupdate
